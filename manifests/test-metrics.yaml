@@ -12,7 +12,7 @@ data:
             default_type "text/plain; version=0.0.4";
             return 200 '# HELP upgrade_ready Whether the cluster is ready for an upgrade
     # TYPE upgrade_ready gauge
-    upgrade_ready 7
+    upgrade_ready 1
 
     # HELP upgrade_deprecated_apis Number of deprecated APIs detected
     # TYPE upgrade_deprecated_apis gauge
