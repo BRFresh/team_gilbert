@@ -124,4 +124,6 @@ deleted resources, and API timeouts without needing a live cluster.
 ## Container publishing and OpenShift
 
 See [Publish and deploy](docs/deploy.md) for the GHCR workflow, ServiceAccount
-credentials, read-only RBAC, and the prepared replacement for `manifests/app.yaml`.
+credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`. The nginx test app stays
+in `manifests`; configure the scanner Argo CD Application to watch `feat` at
+`deploy/upgrade-checker`.

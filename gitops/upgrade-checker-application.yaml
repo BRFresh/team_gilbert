@@ -1,0 +1,23 @@
+# Apply only after deploy/upgrade-checker exists on the remote feat branch
+# and the public ghcr.io/brfresh/team_gilbert:feat image has been published.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: upgrade-checker
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BRFresh/team_gilbert.git
+    targetRevision: feat
+    path: deploy/upgrade-checker
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: upgrade-checker
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: false
+    syncOptions:
+    - CreateNamespace=true
