@@ -15,7 +15,7 @@ spec:
       labels:
         app: upgrade-checker
     spec:
-      ServiceAccount: upgrade-checker
+      serviceAccountName: upgrade-checker
       containers:
       - name: upgrade-checker
         image: #hier moet daadwerklijke image komen
