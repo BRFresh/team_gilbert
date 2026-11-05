@@ -3,7 +3,7 @@ name: Publish container image
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feat]
     paths:
       - 'app/**'
       - 'Dockerfile'
