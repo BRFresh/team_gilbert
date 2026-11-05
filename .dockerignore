@@ -1,0 +1,7 @@
+# Only source files needed for the build enter the build context.
+**
+!Dockerfile
+!app/
+!app/go.mod
+!app/go.sum
+!app/*.go

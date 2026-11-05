@@ -48,8 +48,8 @@ routing permits. Use `-listen-address=127.0.0.1:8080` to restrict it to localhos
 The endpoint serves plain HTTP without authentication.
 
 Local kubeconfig is the default. For a future pod deployment, `-in-cluster`
-explicitly selects its service account. No container or deployment manifests are
-included. Argo CD can later deploy those manifests; OpenShift runs the pod.
+explicitly selects its service account. The container and deployment preparation is described in
+[Publish and deploy](docs/deploy.md). Argo CD deploys the manifests; OpenShift runs the pod.
 
 ## Metrics
 
@@ -120,3 +120,8 @@ go test -race ./...
 Tests use fake Kubernetes/OpenShift resources and a simulated stalled transport.
 They cover metric values, missing fields, permission failures and recovery,
 deleted resources, and API timeouts without needing a live cluster.
+
+## Container publishing and OpenShift
+
+See [Publish and deploy](docs/deploy.md) for the GHCR workflow, ServiceAccount
+credentials, read-only RBAC, and the prepared replacement for `manifests/app.yaml`.
