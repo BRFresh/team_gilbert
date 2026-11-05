@@ -15,8 +15,8 @@ spec:
         app: test-web
     spec:
       containers:
-      - name: nginx
-        image: docker.io/library/nginx:alpine
+      - name: web
+        image: docker.io/library/httpd:alpine
         ports:
         - containerPort: 80
         resources:
