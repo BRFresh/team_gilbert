@@ -18,7 +18,7 @@ spec:
       serviceAccountName: upgrade-checker
       containers:
       - name: upgrade-checker
-        image: #hier moet daadwerklijke image komen
+        image:  nginxinc/nginx-unprivileged:stable
         ports:
         - containerPort: 8080
         resources:
