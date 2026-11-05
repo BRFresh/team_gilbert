@@ -1,14 +1,12 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: test-web-route
-  labels:
-    app: test-web
+  name: upgrade-checker
+  namespace: upgrade-checker
 spec:
   to:
     kind: Service
-    name: test-web-service
-    weight: 100
+    name: upgrade-checker
   port:
     targetPort: http
   wildcardPolicy: None

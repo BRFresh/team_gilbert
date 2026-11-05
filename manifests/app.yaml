@@ -1,22 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: test-web-app
+  name: upgrade-checker
+  namespace: upgrade-checker
   labels:
-    app: test-web
+    app: upgrade-checker
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: test-web
+      app: upgrade-checker
   template:
     metadata:
       labels:
-        app: test-web
+        app: upgrade-checker
     spec:
+      ServiceAccount: upgrade-checker
       containers:
-      - name: nginx
-        image: bitnami/nginx:latest
+      - name: upgrade-checker
+        image: #hier moet daadwerklijke image komen
         ports:
         - containerPort: 8080
         resources:
