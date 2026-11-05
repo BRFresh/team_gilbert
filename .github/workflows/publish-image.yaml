@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.ref_name == 'main' || github.ref_name == 'feat'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,11 +37,13 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          tags: |
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
       - name: Record deployable image
         env:
           IMAGE: ${{ steps.image.outputs.name }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo 'Use this exact image in manifests/app.yaml:' >> "$GITHUB_STEP_SUMMARY"
+          echo 'For a reproducible rollout, set this exact image in deploy/upgrade-checker/app.yaml:' >> "$GITHUB_STEP_SUMMARY"
           echo "\`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
