@@ -21,8 +21,8 @@ curl http://localhost:8080/metrics
 
 This is a plain-text Prometheus metrics endpoint, not an HTML dashboard. The
 existing OpenShift collection/forwarding setup can read this endpoint. This repo
-only implements the exporter; it does not configure Prometheus or the Cluster
-Observability Operator.
+also supplies a [Perses upgrade readiness dashboard](docs/perses.md) for the
+installed Cluster Observability Operator. It does not install Prometheus or COO.
 
 The app reads the same local kubeconfig as `oc`: files listed in `KUBECONFIG`
 when set, otherwise `$HOME/.kube/config`. It uses the current context and credentials.
@@ -142,6 +142,12 @@ in `manifests`; configure the scanner Argo CD Application to watch `feat` at
 `deploy/upgrade-checker`.
 
 ## Using the extra evidence
+
+The first Perses dashboard and its Thanos datasource are in
+`deploy/upgrade-checker/perses-dashboard.yaml` and `perses-datasource.yaml`.
+Argo CD deploys both from `feat` alongside the exporter. See
+[Dashboard setup and interpretation](docs/perses.md) for rollout prerequisites,
+collection health, findings, remediation, and assessment limits.
 
 A PDB with zero allowed disruptions is not automatically misconfigured. Compare
 its healthy, required, and expected pod counts and budget settings. Ignore its
