@@ -59,6 +59,16 @@ All metrics use the `upgrade_checker_` prefix and are gauges.
 | --- | --- | --- |
 | `collection_success` | `resource` | 1 if that resource type was collected successfully, 0 on API or decoding errors. |
 | `node_ready` | `node` | 1 when Ready is True; 0 for False, Unknown, or missing Ready. |
+| `node_condition` | `node`, `condition`, `status` | True/False/Unknown series for Ready, pressure conditions, NetworkUnavailable, and any additional reported conditions. Missing conditions are Unknown. |
+| `node_info` | `node`, `kubelet_version`, `architecture` | Value 1 with the reported kubelet version and architecture. |
+| `node_unschedulable` | `node` | 1 when the node is cordoned. |
+| `pdb_current_healthy` | `namespace`, `pdb` | Current healthy pod count. |
+| `pdb_desired_healthy` | `namespace`, `pdb` | Required healthy pod count. |
+| `pdb_expected_pods` | `namespace`, `pdb` | Expected pod count. |
+| `pdb_status_current` | `namespace`, `pdb` | 1 when observedGeneration matches generation. Only interpret PDB status when this equals 1. |
+| `pdb_spec_info` | `namespace`, `pdb`, `min_available`, `max_unavailable`, `unhealthy_pod_eviction_policy` | Value 1 with budget settings. Integers/percentages are preserved as labels; empty means unset. |
+| `clusteroperator_version_info` | `operator`, `component`, `version` | Value 1 for each reported component version. These are component versions, not a selected upgrade target. |
+| `api_removal_reported` | `name` | 1 if OpenShift reports a removal release. Does not imply recent use or incompatibility with a selected target. |
 | `pdb_disruptions_allowed` | `namespace`, `pdb` | Current `status.disruptionsAllowed`. |
 | `pdb_blocked` | `namespace`, `pdb` | 1 when allowed disruptions equals zero. |
 | `clusteroperator_condition` | `operator`, `condition`, `status` | One series per True/False/Unknown status, with the current status set to 1. Missing Available, Progressing, Degraded, or Upgradeable conditions are Unknown. |
@@ -127,3 +137,27 @@ See [Publish and deploy](docs/deploy.md) for the GHCR workflow, ServiceAccount
 credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`. The nginx test app stays
 in `manifests`; configure the scanner Argo CD Application to watch `feat` at
 `deploy/upgrade-checker`.
+
+## Using the extra evidence
+
+A PDB with zero allowed disruptions is not automatically misconfigured. Compare
+its healthy, required, and expected pod counts and budget settings. Ignore its
+status for readiness decisions when `upgrade_checker_pdb_status_current` is 0.
+
+APIs with a reported removal release and requests in the reporting window can
+be selected with PromQL (for one cluster/target):
+
+```promql
+(upgrade_checker_api_requests_window > 0)
+  and on(job, instance, name) (upgrade_checker_api_removal_reported == 1)
+  and on(job, instance) (upgrade_checker_collection_success{resource="apirequestcounts"} == 1)
+```
+
+Join `apirequestcount_info` to show the removal release. When aggregating multiple
+clusters, include your cluster identity label in joins as well. Removal versions
+must be interpreted against the selected OpenShift/Kubernetes target version.
+No matching API is an empty result, not proof that all manifests are compatible.
+
+The exporter supplies observations. Unsupported-resource policies, target-version
+compatibility, remediation text, and the overall Go/No-Go decision remain with
+the downstream assessment/dashboard. There is no separate deprecated-API endpoint.
