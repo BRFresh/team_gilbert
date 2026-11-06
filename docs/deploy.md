@@ -59,7 +59,7 @@ OpenShift starts the pod as ServiceAccount `upgrade-checker`, mounts its rotatin
 token and cluster CA, and supplies the Kubernetes API address. `-in-cluster`
 selects `rest.InClusterConfig()`, which uses these credentials. The ClusterRole
 permits only listing nodes, PDBs across namespaces, ClusterOperators, and
-APIRequestCounts. Anyone downloading the public image gets code, not this identity.
+APIRequestCounts, plus `get` on `clusterversions/version`. Anyone downloading the public image gets code, not this identity.
 
 ## Verify
 
@@ -75,7 +75,7 @@ In another terminal:
 curl http://localhost:8080/metrics
 ```
 
-All four `upgrade_checker_collection_success` samples should equal 1. API failures
+All five `upgrade_checker_collection_success` samples should equal 1. API failures
 are logged and appear as 0. Both health probes check the HTTP process, not API
 permissions. No public Route is needed for in-cluster collection.
 

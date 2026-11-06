@@ -17,6 +17,8 @@ import (
 )
 
 var (
+	operatorConditionInfo  = metric("clusteroperator_condition_info", "Reported operator condition status and reason.", "operator", "condition", "status", "reason")
+	apiRemovalInUse        = metric("api_removal_in_use", "Whether an API with a reported removal release has requests in the status reporting window. Omitted when the request count is missing.", "name", "removed_in_release")
 	clusterOperators       = schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "clusteroperators"}
 	apiRequestCounts       = schema.GroupVersionResource{Group: "apiserver.openshift.io", Version: "v1", Resource: "apirequestcounts"}
 	collectionSuccess      = metric("collection_success", "Whether this resource type was collected successfully (1 or 0).", "resource")
@@ -62,7 +64,7 @@ type readinessCollector struct {
 }
 
 func (c *readinessCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, desc := range []*prometheus.Desc{collectionSuccess, nodeReady, nodeCondition, nodeInfo, nodeUnschedulable, pdbAllowed, pdbBlocked, pdbCurrentHealthy, pdbDesiredHealthy, pdbExpectedPods, pdbStatusCurrent, pdbSpec, operatorCondition, operatorVersion, apiInfo, apiRemovalReported, apiRequests, apiRequestsCurrentHour} {
+	for _, desc := range []*prometheus.Desc{collectionSuccess, nodeReady, nodeCondition, nodeInfo, nodeUnschedulable, pdbAllowed, pdbBlocked, pdbCurrentHealthy, pdbDesiredHealthy, pdbExpectedPods, pdbStatusCurrent, pdbSpec, operatorCondition, operatorVersion, apiInfo, apiRemovalReported, apiRequests, apiRequestsCurrentHour, operatorConditionInfo, apiRemovalInUse, clusterVersionInfo, clusterVersionCondition, clusterVersionReason, clusterUpgradeable, clusterAvailableUpdate, clusterUnmanagedOverride, clusterUnmanagedOverrides} {
 		ch <- desc
 	}
 }
@@ -78,8 +80,9 @@ func (c *readinessCollector) Collect(ch chan<- prometheus.Metric) {
 		{"poddisruptionbudgets", c.collectPDBs},
 		{"clusteroperators", c.collectOperators},
 		{"apirequestcounts", c.collectAPIRequests},
+		{"clusterversion", c.collectClusterVersion},
 	}
-	// Run the four independent reads concurrently under one timeout.
+	// Run independent reads concurrently under one timeout.
 	var wg sync.WaitGroup
 	for _, check := range checks {
 		wg.Go(func() {
@@ -191,6 +194,11 @@ func (c *readinessCollector) collectOperators(ctx context.Context, ch chan<- pro
 			if err != nil || (status != "True" && status != "False" && status != "Unknown") {
 				return fmt.Errorf("%s: invalid status for %s", operator.GetName(), kind)
 			}
+			reason, _, err := unstructured.NestedString(condition, "reason")
+			if err != nil {
+				return fmt.Errorf("%s: invalid reason for %s", operator.GetName(), kind)
+			}
+			gauge(ch, operatorConditionInfo, 1, operator.GetName(), kind, status, reason)
 			values[kind] = status
 		}
 		for kind, value := range values {
@@ -228,6 +236,9 @@ func (c *readinessCollector) collectAPIRequests(ctx context.Context, ch chan<- p
 			// An absent count is unknown, not zero.
 			if found {
 				gauge(ch, field.desc, float64(value), count.GetName())
+				if field.desc == apiRequests {
+					gauge(ch, apiRemovalInUse, boolValue(release != "" && value > 0), count.GetName(), release)
+				}
 			}
 		}
 	}

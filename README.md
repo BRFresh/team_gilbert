@@ -87,7 +87,7 @@ for the source fields.
 
 ## Failure handling
 
-Each scrape reads all four resource types concurrently with a shared timeout
+Each scrape reads all five resource types concurrently with a shared timeout
 (default 5 seconds). Configure the scraper timeout above this value. Only one
 scrape is allowed at a time; overlapping requests receive HTTP 503.
 
@@ -111,6 +111,8 @@ The credentials need cluster-wide `list` permission for:
 - `clusteroperators` in `config.openshift.io`
 - `apirequestcounts` in `apiserver.openshift.io`
 
+It also needs `get` permission for `clusterversions/version` in `config.openshift.io`.
+
 Check the current user's permissions:
 
 ```sh
@@ -118,6 +120,7 @@ oc auth can-i list nodes
 oc auth can-i list poddisruptionbudgets.policy --all-namespaces
 oc auth can-i list clusteroperators.config.openshift.io
 oc auth can-i list apirequestcounts.apiserver.openshift.io
+oc auth can-i get clusterversions.config.openshift.io/version
 ```
 
 ## Tests
@@ -161,3 +164,49 @@ No matching API is an empty result, not proof that all manifests are compatible.
 The exporter supplies observations. Unsupported-resource policies, target-version
 compatibility, remediation text, and the overall Go/No-Go decision remain with
 the downstream assessment/dashboard. There is no separate deprecated-API endpoint.
+
+## ClusterVersion and actionable upgrade findings
+
+The exporter now reads the same object as `oc get clusterversion version -o json`.
+Deploy the updated ClusterRole as well as the image: it adds only `get` access
+to the named `clusterversions/version` object. Existing list permissions stay unchanged.
+
+All names below have the `upgrade_checker_` prefix:
+
+| Metric | Meaning |
+| --- | --- |
+| `clusterversion_info` | Desired release, last completed release from history, and channel. Desired can be an update in progress. |
+| `clusterversion_condition` | True/False/Unknown series for CVO conditions. |
+| `clusterversion_condition_info` | Reported condition, status, and reason code. |
+| `clusterversion_upgradeable` | CVO's Upgradeable condition: 1=True, 0=False, -1=missing/Unknown. Absent on failed collection. |
+| `clusterversion_available_update_info` | Versions in status.availableUpdates. Check RetrievedUpdates before interpreting this list; conditionalUpdates are not exported. |
+| `clusterversion_unmanaged_override` | Each explicitly overridden release resource, with group/kind/namespace/name and 1 for unmanaged. |
+| `clusterversion_unmanaged_overrides` | Total unmanaged release resources; 0 when none are configured. |
+| `clusteroperator_condition_info` | Operator condition, status, and reason code. |
+| `api_removal_in_use` | 1 when a removal release is reported and status.requestCount is positive; labels identify the API and removal release. Missing request counts produce no sample. |
+
+These are observations, not a complete target-specific GO/NO-GO calculation.
+`Upgradeable=False` is a reported blocker for minor/major upgrades; it does not
+necessarily block a patch update. `Upgradeable=True` does not verify workloads,
+PDBs or target-version compatibility. Evaluate other evidence alongside it.
+
+For a dashboard's **OpenShift upgrade gate** panel, use this query and map
+0 to BLOCKED, 1 to ALLOWED BY CVO, -1 to UNKNOWN, and no data to UNKNOWN:
+
+```promql
+upgrade_checker_clusterversion_upgradeable
+  and on(job, instance) (upgrade_checker_collection_success{resource="clusterversion"} == 1)
+```
+
+Show `clusterversion_condition_info{condition="Upgradeable"}` for its reason.
+Use `oc get clusterversion version -o json` for full messages; long messages are
+not metric labels. Unmanaged release resources provide one concrete configuration
+finding, not a generic unsupported-resource inventory. Overrides in a CRC/dev
+cluster may be deliberate: do not remove them automatically.
+
+For API findings, use `upgrade_checker_api_removal_in_use == 1`, gated by successful
+APIRequestCount collection. A positive value identifies observed usage to investigate,
+not proof of incompatibility with an unspecified upgrade target. Synthetic tests
+exercise positive findings even when the live cluster has none.
+
+Source: [OpenShift ClusterVersion API](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/config_apis/clusterversion-config-openshift-io-v1).
