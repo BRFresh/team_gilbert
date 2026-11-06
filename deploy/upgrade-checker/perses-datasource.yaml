@@ -1,0 +1,30 @@
+# COO's Perses operator creates the referenced Perses secret from spec.client.
+# This is a Perses secret name, not a Kubernetes Secret containing an oc token.
+apiVersion: perses.dev/v1alpha2
+kind: PersesDatasource
+metadata:
+  name: upgrade-checker-thanos
+  namespace: upgrade-checker
+  labels:
+    app.kubernetes.io/part-of: upgrade-checker
+spec:
+  config:
+    display:
+      name: OpenShift metrics (Thanos)
+    # COO also resolves a default datasource for implicit frontend lookups.
+    default: true
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        scrapeInterval: 30s
+        proxy:
+          kind: HTTPProxy
+          spec:
+            url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+            secret: upgrade-checker-thanos-secret
+  client:
+    tls:
+      enable: true
+      caCert:
+        type: file
+        certPath: /ca/service-ca.crt

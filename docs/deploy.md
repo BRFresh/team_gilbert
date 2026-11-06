@@ -105,6 +105,15 @@ image: ghcr.io/brfresh/team_gilbert@sha256:<published-digest>
 Commit that change to feat. The changed Deployment then triggers a rollout.
 Manifest-only changes intentionally do not rebuild the image.
 
+## Perses dashboard
+
+The same Argo CD source directory includes a COO Perses dashboard and a
+namespace-scoped Thanos datasource. Dashboard-only commits on `feat` sync through
+Argo CD without an image rebuild. See [Perses setup](perses.md) for the exporter
+version prerequisite, verification commands, scrape labels, and finding semantics.
+The ServiceMonitor also requires user workload monitoring to be enabled. If the
+instance selector is empty, follow the [monitoring prerequisite checks](perses.md#monitoring-prerequisite-and-missing-instances).
+
 ## References
 
 - [Argo CD application source and destination](https://argo-cd.readthedocs.io/en/latest/user-guide/application-specification/)

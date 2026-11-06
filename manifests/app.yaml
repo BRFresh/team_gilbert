@@ -1,59 +1,39 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: test-web-app
+  name: upgrade-checker
+  namespace: upgrade-checker
   labels:
-    app: test-web
+    app: upgrade-checker
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: test-web
+      app: upgrade-checker
   template:
     metadata:
       labels:
-        app: test-web
+        app: upgrade-checker
     spec:
+      serviceAccountName: upgrade-checker
       containers:
-      - name: nginx
-        image: bitnami/nginx:latest
-        ports:
-        - containerPort: 8080
-        resources:
-          limits:
-            cpu: "100m"
-            memory: "128Mi"
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: test-web-service
-  labels:
-    app: test-web
-spec:
-  ports:
-  - port: 80
-    targetPort: 8080
-    protocol: TCP
-    name: http
-  selector:
-    app: test-web
-  type: ClusterIP
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: test-web-route
-  labels:
-    app: test-web
-spec:
-  to:
-    kind: Service
-    name: test-web-service
-    weight: 100
-  port:
-    targetPort: http
-  wildcardPolicy: None
+        - name: upgrade-checker
+          image: nginxinc/nginx-unprivileged:stable
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: test-metrics
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+          resources:
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+      volumes:
+        - name: test-metrics
+          configMap:
+            name: upgrade-checker-test-metrics
