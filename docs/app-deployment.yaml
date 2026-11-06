@@ -1,0 +1,2 @@
+# The active deployment manifest is now deploy/upgrade-checker/app.yaml.
+# See docs/deploy.md for the Argo CD path and release steps.
