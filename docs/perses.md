@@ -19,8 +19,9 @@ includes the existing user workload metrics. COO creates the Perses secret
 path `/ca/service-ca.crt` matches the COO setup. No login token is committed.
 This follows the [official OpenShift datasource example](https://github.com/perses/perses-operator/blob/main/config/samples/openshift/thanos-querier-datasource.yaml).
 
-The namespace-scoped datasource is explicitly named and is not made the default,
-so it can coexist with other dashboards. Users need permission to view the
+The namespace-scoped datasource is explicitly named and is the project's default
+Prometheus datasource. COO also needs that default for frontend lookups without
+an explicit datasource name. Users need permission to view the
 dashboard and datasource in `upgrade-checker`, and permission to query the
 underlying monitoring data. See [COO dashboard access and RBAC](https://docs.redhat.com/en/documentation/red_hat_openshift_cluster_observability_operator/1-latest/html/ui_plugins_for_red_hat_openshift_cluster_observability_operator/perses-dashboard).
 
@@ -77,8 +78,10 @@ or the older image is still running.
 
 ## Reading the dashboard
 
-The page refreshes every 30 seconds. Summary cards and findings use instant
-queries at the selected time range's end. Keep the range ending at **now** for
+The page refreshes every 30 seconds. Panel plugins choose their query mode;
+summary cards display the last value at the selected time range's end. The
+installed Prometheus plugin rejects an explicit `instant` field in query YAML.
+Keep the range ending at **now** for
 an assessment of current conditions; choosing a historical end shows historical
 evidence. Select one exporter instance to avoid combining different scrapes.
 

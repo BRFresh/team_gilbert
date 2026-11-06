@@ -11,7 +11,8 @@ spec:
   config:
     display:
       name: OpenShift metrics (Thanos)
-    default: false
+    # COO also resolves a default datasource for implicit frontend lookups.
+    default: true
     plugin:
       kind: PrometheusDatasource
       spec:

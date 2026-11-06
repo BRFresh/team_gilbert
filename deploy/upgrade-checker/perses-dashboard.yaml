@@ -97,7 +97,6 @@ spec:
                         (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource=~"nodes|poddisruptionbudgets|clusteroperators|apirequestcounts|clusterversion"} == bool 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                       ) or vector(-1)
-                    instant: true
       cvo:
         kind: "Panel"
         spec:
@@ -142,7 +141,6 @@ spec:
                         (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                       )) or vector(-1)
-                    instant: true
       nodeCount:
         kind: "Panel"
         spec:
@@ -190,7 +188,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="nodes"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       operatorCount:
         kind: "Panel"
         spec:
@@ -239,7 +236,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusteroperators"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       pdbCount:
         kind: "Panel"
         spec:
@@ -288,7 +284,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       stalePdbCount:
         kind: "Panel"
         spec:
@@ -336,7 +331,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       apiCount:
         kind: "Panel"
         spec:
@@ -384,7 +378,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="apirequestcounts"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       overrideCount:
         kind: "Panel"
         spec:
@@ -432,7 +425,6 @@ spec:
                         or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
                       ) or vector(-1)
-                    instant: true
       collectionDetails:
         kind: "Panel"
         spec:
@@ -468,7 +460,6 @@ spec:
                         upgrade_checker_collection_success{job="upgrade-checker",instance="$instance"}
                         and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                       )
-                    instant: true
       release:
         kind: "Panel"
         spec:
@@ -511,7 +502,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       cvoConditions:
         kind: "Panel"
         spec:
@@ -554,7 +544,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       operatorDetails:
         kind: "Panel"
         spec:
@@ -612,7 +601,6 @@ spec:
                         unless on(job, instance, operator, condition, status)
                         upgrade_checker_clusteroperator_condition_info{job="upgrade-checker",instance="$instance"}
                       )
-                    instant: true
       nodeDetails:
         kind: "Panel"
         spec:
@@ -656,7 +644,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       cordonedNodes:
         kind: "Panel"
         spec:
@@ -695,7 +682,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       pdbDetails:
         kind: "Panel"
         spec:
@@ -756,7 +742,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       stalePdbDetails:
         kind: "Panel"
         spec:
@@ -797,7 +782,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       apiDetails:
         kind: "Panel"
         spec:
@@ -840,7 +824,6 @@ spec:
                         * on(job, instance, name) group_left()
                         upgrade_checker_api_requests_window{job="upgrade-checker",instance="$instance"}
                       )
-                    instant: true
       overrides:
         kind: "Panel"
         spec:
@@ -885,7 +868,6 @@ spec:
                           and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
                         )
                       )
-                    instant: true
       remediation:
         kind: "Panel"
         spec:
