@@ -49,12 +49,58 @@ open **OpenShift upgrade readiness**. Inspect resource status conditions if
 the dashboard or datasource has not reconciled. Argo CD must be allowed to manage
 both Perses resource kinds in this namespace.
 
+## Monitoring prerequisite and missing instances
+
+The existing ServiceMonitor requires **OpenShift user workload monitoring** to
+be enabled. A ServiceMonitor by itself does not run Prometheus. The exporter
+Route and `/healthz` can be healthy while no metrics are being collected.
+
+Check the platform configuration and monitoring pods:
+
+```sh
+oc -n openshift-monitoring get configmap cluster-monitoring-config -o yaml
+oc -n openshift-user-workload-monitoring get pods
+```
+
+`cluster-monitoring-config` must contain `enableUserWorkload: true` inside
+`data/config.yaml`. If the ConfigMap is absent, restore it with:
+
+```sh
+oc apply -f gitops/user-workload-monitoring-config.yaml
+```
+
+If it already contains other settings, merge the flag into that configuration
+instead of replacing it. Keep this platform ConfigMap under one GitOps owner.
+It lives outside the scanner's application directory because it configures the
+shared monitoring stack. See [OpenShift's user workload monitoring setup](https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.22/html/configuring_user_workload_monitoring/preparing-to-configure-the-monitoring-stack-uwm).
+
+Wait for the user workload Prometheus pods to become Ready, then allow the
+ServiceMonitor's 30-second scrape interval and check the queries below. An empty
+instance selector means there is no matching current `up` series, or its query
+failed. The instance values are pod IPs and ports, so a rollout changes them;
+select the current instance after refreshing the dashboard.
+
+The datasource must keep pointing to Thanos's Prometheus query API. The
+exporter's `/metrics` URL is a scrape endpoint, not a Perses datasource API.
+`/healthz` checks process liveness only; use `collection_success` and `up` to
+verify the full data path.
+
+### Argo CD ownership
+
+The live cluster reported `SharedResourceWarning` because `upgrade-checker`
+(branch `feat`) and `monitor-test` (branch `gitops-infra`) both manage the scanner
+Deployment, Service, ServiceAccount and reader RBAC. Keep those resources under
+one Application. A separate monitoring Application should own only its monitoring
+resources. Syncing two different branch versions over the same resources makes
+rollouts and configuration changes unreliable.
+
 ## Exporter version prerequisite
 
 The dashboard requires the `upgrade_checker_*` metrics described in the README.
-At implementation time, the live target was up but exposed only the older
-`upgrade_ready` and `upgrade_deprecated_apis` metrics. An existing ServiceMonitor
-and a healthy `up` metric do not prove the current scanner version is running.
+If the live target exposes only the older `upgrade_ready` and
+`upgrade_deprecated_apis` metrics, it is running an older exporter. An existing
+ServiceMonitor and a healthy `up` metric do not prove the current scanner version
+is running.
 
 Publish the current Go exporter using the existing Actions workflow, then commit
 its image digest to the Deployment in `deploy/upgrade-checker/app.yaml` on
@@ -96,21 +142,24 @@ evidence. Select one exporter instance to avoid combining different scrapes.
 - **Operators:** shows unavailable/non-upgradeable, degraded/progressing, and
   unknown standard conditions. The summary counts conditions, not distinct
   Operators. Missing conditions remain visible even without a reported reason.
-- **Nodes:** counts nodes not Ready; tables also show active pressure/network
-  conditions and deliberate cordons. A cordon alone is not a health failure.
+- **Nodes:** counts nodes not Ready. The current node is Ready and uncordoned,
+  so the empty node-condition and cordon detail tables are omitted.
 - **PDBs:** separates current-status drain blockers from stale controller status.
-  Blocker rows show healthy, desired, expected and allowed disruption counts
-  alongside budget settings. Zero allowed disruptions is a drain concern, not
+  The current PDBs all have current status and allow disruptions, so both empty
+  detail tables are omitted. Zero allowed disruptions is a drain concern, not
   automatic proof of an incorrect PDB.
-- **API removals:** shows APIs with a reported removal release and positive
-  requests in OpenShift's reporting window. Request counts are gauges and are
-  never passed to `rate()`. Compare the Kubernetes removal release against the
-  Kubernetes version in the intended OpenShift upgrade before deciding whether
-  the usage blocks that upgrade.
+- **API removals:** counts observed usage of APIs with a reported removal release.
+  The current cluster returns no APIRequestCount objects, so the empty API usage
+  detail table is omitted. Zero observed usage is not evidence that workload
+  manifests are compatible with the intended upgrade. Request counts are gauges
+  and must not be passed to `rate()`.
 - **Unmanaged release resources:** exposes explicit CVO unmanaged overrides.
   These may be deliberate in CRC/dev clusters. The exporter does not perform a
   general unsupported-resource or third-party Operator support scan.
 
+The five empty node, cordon, PDB and API usage detail panels were removed after
+checking their queries through Perses. The node readiness, PDB and API usage
+summary cards remain; use the remediation commands when a count becomes positive.
 The final panel explains investigation and remediation commands. Empty findings
 tables indicate no matches only when the corresponding collection succeeded.
 Even with no findings, target-version manifest compatibility and vendor support

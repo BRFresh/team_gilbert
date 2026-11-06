@@ -1,0 +1,11 @@
+# Cluster-level prerequisite for scraping the upgrade-checker ServiceMonitor.
+# Apply once, or manage from a single platform GitOps application. If this
+# ConfigMap already has other settings, merge this flag into its config.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
