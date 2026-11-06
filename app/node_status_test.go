@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
@@ -35,7 +36,7 @@ func testCollector() *readinessCollector {
 	operator := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "config.openshift.io/v1", "kind": "ClusterOperator",
 		"metadata": map[string]interface{}{"name": "console"},
-		"status": map[string]interface{}{"conditions": []interface{}{
+		"status": map[string]interface{}{"versions": []interface{}{map[string]interface{}{"name": "operator", "version": "4.20.1"}}, "conditions": []interface{}{
 			map[string]interface{}{"type": "Available", "status": "True"},
 			map[string]interface{}{"type": "Degraded", "status": "False"},
 		}},
@@ -43,11 +44,11 @@ func testCollector() *readinessCollector {
 	count := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "apiserver.openshift.io/v1", "kind": "APIRequestCount",
 		"metadata": map[string]interface{}{"name": "widgets.v1.example.com"},
-		"status":   map[string]interface{}{"removedInRelease": "4.20", "requestCount": int64(12), "currentHour": map[string]interface{}{"requestCount": int64(3)}},
+		"status":   map[string]interface{}{"removedInRelease": "1.26", "requestCount": int64(12), "currentHour": map[string]interface{}{"requestCount": int64(3)}},
 	}}
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
 		clusterOperators: "ClusterOperatorList", apiRequestCounts: "APIRequestCountList",
-	}, operator, count)
+	}, operator, count, clusterVersionFixture())
 	return &readinessCollector{kube: kube, dynamic: dynamicClient, timeout: time.Second}
 }
 
@@ -80,16 +81,21 @@ func TestMetricsAndFreshData(t *testing.T) {
 	body := scrape(t, c)
 	expect(t, body,
 		`upgrade_checker_node_ready{node="crc"} 1`,
+		`upgrade_checker_node_condition{condition="Ready",node="crc",status="True"} 1`,
+		`upgrade_checker_node_condition{condition="MemoryPressure",node="crc",status="Unknown"} 1`,
+		`upgrade_checker_clusteroperator_version_info{component="operator",operator="console",version="4.20.1"} 1`,
+		`upgrade_checker_api_removal_reported{name="widgets.v1.example.com"} 1`,
+		`upgrade_checker_api_removal_in_use{name="widgets.v1.example.com",removed_in_release="1.26"} 1`,
 		`upgrade_checker_pdb_blocked{namespace="test",pdb="blocked"} 1`,
 		`upgrade_checker_pdb_disruptions_allowed{namespace="other",pdb="allowed"} 2`,
 		`upgrade_checker_clusteroperator_condition{condition="Available",operator="console",status="True"} 1`,
 		`upgrade_checker_clusteroperator_condition{condition="Degraded",operator="console",status="True"} 0`,
 		`upgrade_checker_clusteroperator_condition{condition="Upgradeable",operator="console",status="Unknown"} 1`,
-		`upgrade_checker_apirequestcount_info{name="widgets.v1.example.com",removed_in_release="4.20"} 1`,
+		`upgrade_checker_apirequestcount_info{name="widgets.v1.example.com",removed_in_release="1.26"} 1`,
 		`upgrade_checker_api_requests_window{name="widgets.v1.example.com"} 12`,
 		`upgrade_checker_api_requests_current_hour{name="widgets.v1.example.com"} 3`,
 	)
-	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts"} {
+	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts", "clusterversion"} {
 		expect(t, body, fmt.Sprintf("upgrade_checker_collection_success{resource=%q} 1", resource))
 	}
 	if err := c.kube.CoreV1().Nodes().Delete(context.Background(), "crc", metav1.DeleteOptions{}); err != nil {
@@ -130,8 +136,8 @@ func TestMissingAndInvalidCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := scrape(t, c)
-	expect(t, body, `upgrade_checker_collection_success{resource="apirequestcounts"} 1`)
-	if strings.Contains(body, "upgrade_checker_api_requests_window{") {
+	expect(t, body, `upgrade_checker_collection_success{resource="apirequestcounts"} 1`, `upgrade_checker_api_removal_reported{name="widgets.v1.example.com"} 0`)
+	if strings.Contains(body, "upgrade_checker_api_requests_window{") || strings.Contains(body, "upgrade_checker_api_removal_in_use{") {
 		t.Fatal("missing count was reported as zero")
 	}
 	count.Object["status"] = map[string]interface{}{"requestCount": "invalid"}
@@ -163,7 +169,92 @@ func TestAPITimeout(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Fatal("scrape did not respect timeout")
 	}
-	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts"} {
+	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts", "clusterversion"} {
 		expect(t, body, fmt.Sprintf("upgrade_checker_collection_success{resource=%q} 0", resource))
+	}
+}
+
+// Stale PDB status must remain distinguishable from a confirmed disruption block.
+func TestPDBContext(t *testing.T) {
+	c := testCollector()
+	pdb, err := c.kube.PolicyV1().PodDisruptionBudgets("test").Get(context.Background(), "blocked", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdb.Generation = 3
+	pdb.Status = policyv1.PodDisruptionBudgetStatus{ObservedGeneration: 2, CurrentHealthy: 1, DesiredHealthy: 2, ExpectedPods: 3}
+	minAvailable := intstr.FromString("50%")
+	pdb.Spec.MinAvailable = &minAvailable
+	if _, err := c.kube.PolicyV1().PodDisruptionBudgets("test").Update(context.Background(), pdb, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, scrape(t, c),
+		`upgrade_checker_pdb_current_healthy{namespace="test",pdb="blocked"} 1`,
+		`upgrade_checker_pdb_desired_healthy{namespace="test",pdb="blocked"} 2`,
+		`upgrade_checker_pdb_expected_pods{namespace="test",pdb="blocked"} 3`,
+		`upgrade_checker_pdb_status_current{namespace="test",pdb="blocked"} 0`,
+		`upgrade_checker_pdb_spec_info{max_unavailable="",min_available="50%",namespace="test",pdb="blocked",unhealthy_pod_eviction_policy=""} 1`,
+	)
+	pdb.Status.ObservedGeneration = 3
+	pdb.Spec.MinAvailable = nil
+	maxUnavailable := intstr.FromInt32(1)
+	pdb.Spec.MaxUnavailable = &maxUnavailable
+	policy := policyv1.AlwaysAllow
+	pdb.Spec.UnhealthyPodEvictionPolicy = &policy
+	if _, err := c.kube.PolicyV1().PodDisruptionBudgets("test").Update(context.Background(), pdb, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, scrape(t, c),
+		`upgrade_checker_pdb_status_current{namespace="test",pdb="blocked"} 1`,
+		`upgrade_checker_pdb_spec_info{max_unavailable="1",min_available="",namespace="test",pdb="blocked",unhealthy_pod_eviction_policy="AlwaysAllow"} 1`,
+	)
+}
+
+func TestNodePressureAndVersion(t *testing.T) {
+	c := testCollector()
+	node, err := c.kube.CoreV1().Nodes().Get(context.Background(), "crc", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.Spec.Unschedulable = true
+	node.Status.NodeInfo.KubeletVersion = "v1.33.5"
+	node.Status.NodeInfo.Architecture = "amd64"
+	node.Status.Conditions = []corev1.NodeCondition{
+		{Type: corev1.NodeReady, Status: corev1.ConditionFalse},
+		{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionTrue},
+	}
+	if _, err := c.kube.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, scrape(t, c),
+		`upgrade_checker_node_ready{node="crc"} 0`,
+		`upgrade_checker_node_condition{condition="MemoryPressure",node="crc",status="True"} 1`,
+		`upgrade_checker_node_condition{condition="MemoryPressure",node="crc",status="Unknown"} 0`,
+		`upgrade_checker_node_unschedulable{node="crc"} 1`,
+		`upgrade_checker_node_info{architecture="amd64",kubelet_version="v1.33.5",node="crc"} 1`,
+	)
+}
+
+func TestAPIRemovalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, release string
+		requests      int64
+		expected      string
+	}{
+		{"used", "1.26", 12, "1"}, {"unused", "1.26", 0, "0"}, {"no_removal", "", 12, "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testCollector()
+			resource := c.dynamic.Resource(apiRequestCounts)
+			count, err := resource.Get(context.Background(), "widgets.v1.example.com", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count.Object["status"] = map[string]interface{}{"removedInRelease": tc.release, "requestCount": tc.requests}
+			if _, err := resource.Update(context.Background(), count, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			expect(t, scrape(t, c), fmt.Sprintf("upgrade_checker_api_removal_in_use{name=%q,removed_in_release=%q} %s", count.GetName(), tc.release, tc.expected))
+		})
 	}
 }
