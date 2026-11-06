@@ -48,7 +48,7 @@ func testCollector() *readinessCollector {
 	}}
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
 		clusterOperators: "ClusterOperatorList", apiRequestCounts: "APIRequestCountList",
-	}, operator, count)
+	}, operator, count, clusterVersionFixture())
 	return &readinessCollector{kube: kube, dynamic: dynamicClient, timeout: time.Second}
 }
 
@@ -85,6 +85,7 @@ func TestMetricsAndFreshData(t *testing.T) {
 		`upgrade_checker_node_condition{condition="MemoryPressure",node="crc",status="Unknown"} 1`,
 		`upgrade_checker_clusteroperator_version_info{component="operator",operator="console",version="4.20.1"} 1`,
 		`upgrade_checker_api_removal_reported{name="widgets.v1.example.com"} 1`,
+		`upgrade_checker_api_removal_in_use{name="widgets.v1.example.com",removed_in_release="1.26"} 1`,
 		`upgrade_checker_pdb_blocked{namespace="test",pdb="blocked"} 1`,
 		`upgrade_checker_pdb_disruptions_allowed{namespace="other",pdb="allowed"} 2`,
 		`upgrade_checker_clusteroperator_condition{condition="Available",operator="console",status="True"} 1`,
@@ -94,7 +95,7 @@ func TestMetricsAndFreshData(t *testing.T) {
 		`upgrade_checker_api_requests_window{name="widgets.v1.example.com"} 12`,
 		`upgrade_checker_api_requests_current_hour{name="widgets.v1.example.com"} 3`,
 	)
-	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts"} {
+	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts", "clusterversion"} {
 		expect(t, body, fmt.Sprintf("upgrade_checker_collection_success{resource=%q} 1", resource))
 	}
 	if err := c.kube.CoreV1().Nodes().Delete(context.Background(), "crc", metav1.DeleteOptions{}); err != nil {
@@ -136,7 +137,7 @@ func TestMissingAndInvalidCounts(t *testing.T) {
 	}
 	body := scrape(t, c)
 	expect(t, body, `upgrade_checker_collection_success{resource="apirequestcounts"} 1`, `upgrade_checker_api_removal_reported{name="widgets.v1.example.com"} 0`)
-	if strings.Contains(body, "upgrade_checker_api_requests_window{") {
+	if strings.Contains(body, "upgrade_checker_api_requests_window{") || strings.Contains(body, "upgrade_checker_api_removal_in_use{") {
 		t.Fatal("missing count was reported as zero")
 	}
 	count.Object["status"] = map[string]interface{}{"requestCount": "invalid"}
@@ -168,7 +169,7 @@ func TestAPITimeout(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Fatal("scrape did not respect timeout")
 	}
-	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts"} {
+	for _, resource := range []string{"nodes", "poddisruptionbudgets", "clusteroperators", "apirequestcounts", "clusterversion"} {
 		expect(t, body, fmt.Sprintf("upgrade_checker_collection_success{resource=%q} 0", resource))
 	}
 }
@@ -232,4 +233,28 @@ func TestNodePressureAndVersion(t *testing.T) {
 		`upgrade_checker_node_unschedulable{node="crc"} 1`,
 		`upgrade_checker_node_info{architecture="amd64",kubelet_version="v1.33.5",node="crc"} 1`,
 	)
+}
+
+func TestAPIRemovalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, release string
+		requests      int64
+		expected      string
+	}{
+		{"used", "1.26", 12, "1"}, {"unused", "1.26", 0, "0"}, {"no_removal", "", 12, "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testCollector()
+			resource := c.dynamic.Resource(apiRequestCounts)
+			count, err := resource.Get(context.Background(), "widgets.v1.example.com", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count.Object["status"] = map[string]interface{}{"removedInRelease": tc.release, "requestCount": tc.requests}
+			if _, err := resource.Update(context.Background(), count, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			expect(t, scrape(t, c), fmt.Sprintf("upgrade_checker_api_removal_in_use{name=%q,removed_in_release=%q} %s", count.GetName(), tc.release, tc.expected))
+		})
+	}
 }
