@@ -3,6 +3,8 @@ kind: Route
 metadata:
   name: upgrade-checker
   namespace: upgrade-checker
+  labels:
+    app: upgrade-checker
 spec:
   to:
     kind: Service

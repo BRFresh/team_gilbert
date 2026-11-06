@@ -21,8 +21,8 @@ curl http://localhost:8080/metrics
 
 This is a plain-text Prometheus metrics endpoint, not an HTML dashboard. The
 existing OpenShift collection/forwarding setup can read this endpoint. This repo
-only implements the exporter; it does not configure Prometheus or the Cluster
-Observability Operator.
+implements the exporter and a ServiceMonitor for user workload monitoring; it
+does not install Prometheus or the Cluster Observability Operator.
 
 The app reads the same local kubeconfig as `oc`: files listed in `KUBECONFIG`
 when set, otherwise `$HOME/.kube/config`. It uses the current context and credentials.
@@ -47,7 +47,7 @@ The default address binds all interfaces so a collector can reach it if network
 routing permits. Use `-listen-address=127.0.0.1:8080` to restrict it to localhost.
 The endpoint serves plain HTTP without authentication.
 
-Local kubeconfig is the default. For a future pod deployment, `-in-cluster`
+Local kubeconfig is the default. For a pod deployment, `-in-cluster`
 explicitly selects its service account. The container and deployment preparation is described in
 [Publish and deploy](docs/deploy.md). Argo CD deploys the manifests; OpenShift runs the pod.
 
@@ -127,8 +127,10 @@ oc auth can-i get clusterversions.config.openshift.io/version
 
 ```sh
 cd app
-go test -race ./...
+go test ./...
 ```
+
+When CGO and a C compiler are available, also use `go test -race ./...`.
 
 Tests use fake Kubernetes/OpenShift resources and a simulated stalled transport.
 They cover metric values, missing fields, permission failures and recovery,
@@ -137,9 +139,15 @@ deleted resources, and API timeouts without needing a live cluster.
 ## Container publishing and OpenShift
 
 See [Publish and deploy](docs/deploy.md) for the GHCR workflow, ServiceAccount
-credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`. The nginx test app stays
-in `manifests`; configure the scanner Argo CD Application to watch `feat` at
-`deploy/upgrade-checker`.
+credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`.
+Configure the Argo CD Application to watch `feat` at `deploy/upgrade-checker`,
+with destination namespace `upgrade-checker`. This is the only application
+deployment; `manifests/` contains only the cluster-wide monitoring configuration.
+
+In `deploy/upgrade-checker/`, `app.yaml` defines the Deployment. The Service,
+ServiceAccount, RBAC, namespace, Route, and ServiceMonitor each have separate YAML files.
+After Argo CD syncs the manifests, use `oc -n upgrade-checker get route upgrade-checker`
+to find the external hostname, then open `http://<route-host>/metrics`.
 
 ## Using the extra evidence
 
@@ -161,52 +169,10 @@ clusters, include your cluster identity label in joins as well. Removal versions
 must be interpreted against the selected OpenShift/Kubernetes target version.
 No matching API is an empty result, not proof that all manifests are compatible.
 
-### Deprecated API findings
-
-Retrieve a JSON report directly from the app:
-
-```sh
-curl http://localhost:8080/deprecated-apis
-```
-
-Each request lists the cluster-scoped `apiserver.openshift.io/v1/apirequestcounts`
-API using the same credentials and timeout as the metrics collector. Only resources
-with a nonempty `status.removedInRelease` appear in `findings`, including APIs with
-no observed requests. Existing deployment RBAC already grants the required `list`
-permission; no additional permission is needed.
-
-```json
-{
-  "name": "ingresses.v1beta1.networking.k8s.io",
-  "removedInRelease": "1.22",
-  "requests": 12,
-  "requestsCurrentHour": 3,
-  "usage": "observed",
-  "remediation": "Inspect the APIRequestCount for caller usernames and user agents, then update the calling clients and manifests."
-}
-```
-
-This example is one entry inside the report's `findings` array. `usage` is
-`observed` for a positive reporting-window count, `not_observed` for zero, and
-`unknown` for a missing count. Missing counts are JSON `null`. Failures to read or
-decode API data return HTTP 502 with an `error`, rather than an empty successful
-report. Findings include a command to inspect callers and remediation guidance.
-
-The report includes `apiRequestCountsScanned` and a `status`: `no_data` when the
-cluster returns no APIRequestCount objects, `no_removal_reported` when objects
-exist but none has a removal release, and `removal_reported` when findings exist.
-`no_data` means usage cannot be assessed from this source; it is not a clean result.
-
-Compare the reported removal release with the Kubernetes or OpenShift version
-in your selected target release. APIRequestCount is usage evidence, not a static
-manifest scan or a complete inventory of all deprecated APIs. An empty report
-does not prove upgrade readiness. See the
-[APIRequestCount reference](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/metadata_apis/apirequestcount-apiserver-openshift-io-v1).
-
 The exporter supplies observations. Unsupported-resource policies, target-version
 compatibility, remediation text, and the overall Go/No-Go decision remain with
-the downstream assessment/dashboard. The `/deprecated-apis` endpoint supplies
-API findings and migration guidance for that assessment.
+the downstream assessment/dashboard. APIRequestCount findings are exposed through
+`/metrics`; there is no separate `/deprecated-apis` endpoint.
 
 ## ClusterVersion and actionable upgrade findings
 

@@ -13,3 +13,5 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+      # The app allows five seconds for Kubernetes/OpenShift API collection.
+      scrapeTimeout: 10s
