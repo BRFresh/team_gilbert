@@ -1,0 +1,1062 @@
+# Matches COO's v1alpha2 schema: dashboard content lives under spec.config.
+# One current exporter instance is selected to avoid joining different scrapes.
+# The existing ServiceMonitor uses honorLabels=false (the default), so PDB and
+# release-resource namespaces are exposed as exported_namespace in Prometheus.
+apiVersion: "perses.dev/v1alpha2"
+kind: "PersesDashboard"
+metadata:
+  name: "upgrade-readiness"
+  namespace: "upgrade-checker"
+  labels:
+    app.kubernetes.io/part-of: "upgrade-checker"
+spec:
+  config:
+    display:
+      name: "OpenShift upgrade readiness"
+      description: "Upgrade evidence from the upgrade-checker exporter: collection health, CVO, Operators, nodes, PDBs, API removals and unmanaged release resources."
+    duration: "1h"
+    refreshInterval: "30s"
+    variables:
+      - kind: "ListVariable"
+        spec:
+          name: "instance"
+          display:
+            name: "Exporter instance"
+          allowAllValue: false
+          allowMultiple: false
+          sort: "alphabetical-asc"
+          plugin:
+            kind: "PrometheusPromQLVariable"
+            spec:
+              datasource:
+                kind: "PrometheusDatasource"
+                name: "upgrade-checker-thanos"
+              expr: "group by (instance) (up{job=\"upgrade-checker\",namespace=\"upgrade-checker\",service=\"upgrade-checker\"})"
+              labelName: "instance"
+    panels:
+      guide:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Read before deciding to upgrade"
+            description: "Assessment scope and interpretation."
+          plugin:
+            kind: "Markdown"
+            spec:
+              text: |-
+                This dashboard shows the selected exporter's latest observations. Start with **Collections**: it must show **5 / 5**. **UNKNOWN** means missing metrics, a failed API read, or a failed scrape; it never means ready.
+
+                **CVO ALLOWS** is OpenShift's upgradeability condition, not an overall GO decision. **CVO BLOCKED** is a reported minor/major upgrade gate; patch updates may differ. Resolve node and Operator findings and review PDB drain blockers before scheduling an upgrade.
+
+                API findings show observed use and the reported **Kubernetes removal release**. Compare them with the Kubernetes version bundled in your intended OpenShift target. Unmanaged overrides cover release resources only; this exporter does not inventory every unsupported workload or validate manifests against a selected target.
+      collections:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Collections"
+            description: "Five resource reads are required per selected exporter. UNKNOWN also covers a missing/down scrape target."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#C9190B"
+                  - value: 5
+                    color: "#3E8635"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+                - kind: "Value"
+                  spec:
+                    value: "5"
+                    result:
+                      value: "5 / 5"
+                      color: "#3E8635"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      sum(
+                        (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource=~"nodes|poddisruptionbudgets|clusteroperators|apirequestcounts|clusterversion"} == bool 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                      ) or vector(-1)
+                    instant: true
+      cvo:
+        kind: "Panel"
+        spec:
+          display:
+            name: "OpenShift upgrade gate"
+            description: "Upgradeable=True is not a workload compatibility check. See CVO conditions for reason codes and oc get clusterversion version -o json for full messages."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+                - kind: "Value"
+                  spec:
+                    value: "0"
+                    result:
+                      value: "CVO BLOCKED"
+                      color: "#C9190B"
+                - kind: "Value"
+                  spec:
+                    value: "1"
+                    result:
+                      value: "CVO ALLOWS"
+                      color: "#3E8635"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      min((upgrade_checker_clusterversion_upgradeable{job="upgrade-checker",instance="$instance"})
+                      and on(job, instance) (
+                        (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                      )) or vector(-1)
+                    instant: true
+      nodeCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Nodes not Ready"
+            description: "Restore Ready=True and investigate pressure or networking conditions. UNKNOWN means the node read or scrape failed."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count((upgrade_checker_node_ready{job="upgrade-checker",instance="$instance"} == 0)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="nodes"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="nodes"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      operatorCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Operator conditions to investigate"
+            description: "Counts condition findings, not distinct Operators. Includes unavailable/non-upgradeable, degraded/progressing, and unknown conditions."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count(((upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Available|Upgradeable",status=~"False|Unknown"} == 1)
+                        or (upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Degraded|Progressing",status=~"True|Unknown"} == 1))
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusteroperators"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusteroperators"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      pdbCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "PDBs blocking drains"
+            description: "Zero disruptions with current controller status. Review replica health and budget settings; this alone does not prove a misconfiguration."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count(((upgrade_checker_pdb_blocked{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance, exported_namespace, pdb) (upgrade_checker_pdb_status_current{job="upgrade-checker",instance="$instance"} == 1))
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      stalePdbCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "PDBs with stale status"
+            description: "The disruption controller has not observed the latest PDB generation. Do not trust those PDB status values yet."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count((upgrade_checker_pdb_status_current{job="upgrade-checker",instance="$instance"} == 0)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      apiCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Removal APIs observed in use"
+            description: "APIRequestCount reporting-window usage, not a rate or a selected-target compatibility verdict."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count((upgrade_checker_api_removal_in_use{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="apirequestcounts"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="apirequestcounts"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      overrideCount:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Unmanaged release resources"
+            description: "Review explicitly unmanaged CVO release resources. This is not a general unsupported-resource inventory."
+          plugin:
+            kind: "StatChart"
+            spec:
+              calculation: "last"
+              format:
+                unit: "decimal"
+                decimalPlaces: 0
+              thresholds:
+                steps:
+                  - value: -1
+                    color: "#F0AB00"
+                  - value: 0
+                    color: "#3E8635"
+                  - value: 1
+                    color: "#C9190B"
+              mappings:
+                - kind: "Value"
+                  spec:
+                    value: "-1"
+                    result:
+                      value: "UNKNOWN"
+                      color: "#F0AB00"
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      (
+                        count((upgrade_checker_clusterversion_unmanaged_override{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        or (0 * sum((upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)))
+                      ) or vector(-1)
+                    instant: true
+      collectionDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Collection evidence"
+            description: "1 = successful resource read; 0 = failed/partial read. Missing rows mean missing evidence. Check exporter logs and read-only RBAC."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "resource"
+                  header: "Resource"
+                - name: "value"
+                  header: "Collected (1=yes)"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (resource) (
+                        upgrade_checker_collection_success{job="upgrade-checker",instance="$instance"}
+                        and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                      )
+                    instant: true
+      release:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Cluster release context"
+            description: "Desired version can be an update in progress; last completed version is taken from history."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "last_completed_version"
+                  header: "Last completed"
+                - name: "desired_version"
+                  header: "Desired"
+                - name: "channel"
+                  header: "Update channel"
+                - name: "value"
+                  header: "Info"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (last_completed_version, desired_version, channel) (
+                        (upgrade_checker_clusterversion_info{job="upgrade-checker",instance="$instance"})
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      cvoConditions:
+        kind: "Panel"
+        spec:
+          display:
+            name: "ClusterVersion conditions and reasons"
+            description: "Investigate Upgradeable=False/Unknown, Failing=True, Available=False or Progressing=True. RetrievedUpdates=False/Unknown means the available update list is not reliable."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "condition"
+                  header: "Condition"
+                - name: "status"
+                  header: "Status"
+                - name: "reason"
+                  header: "Reason"
+                - name: "value"
+                  header: "Active"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (condition, status, reason) (
+                        (upgrade_checker_clusterversion_condition_info{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      operatorDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Operator findings"
+            description: "Use oc get clusteroperator <operator> -o json to read the full condition message. Restore Available/Upgradeable=True and Degraded/Progressing=False; resolve unknown conditions."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "operator"
+                  header: "Operator"
+                - name: "condition"
+                  header: "Condition"
+                - name: "status"
+                  header: "Status"
+                - name: "reason"
+                  header: "Reason"
+                - name: "value"
+                  header: "Active"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (operator, condition, status, reason) (
+                        (((upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Available|Upgradeable",status=~"False|Unknown"} == 1)
+                        or (upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Degraded|Progressing",status=~"True|Unknown"} == 1))
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusteroperators"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        * on(job, instance, operator, condition, status) group_left(reason)
+                        upgrade_checker_clusteroperator_condition_info{job="upgrade-checker",instance="$instance"}
+                      )
+                      or max by (operator, condition, status) (
+                        (((upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Available|Upgradeable",status=~"False|Unknown"} == 1)
+                        or (upgrade_checker_clusteroperator_condition{job="upgrade-checker",instance="$instance",condition=~"Degraded|Progressing",status=~"True|Unknown"} == 1))
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusteroperators"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        unless on(job, instance, operator, condition, status)
+                        upgrade_checker_clusteroperator_condition_info{job="upgrade-checker",instance="$instance"}
+                      )
+                    instant: true
+      nodeDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Node condition findings"
+            description: "Ready=False/Unknown and active pressure/network-unavailable conditions. Use oc describe node <node>. Unknown optional pressure conditions are available in exporter metrics."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "node"
+                  header: "Node"
+                - name: "condition"
+                  header: "Condition"
+                - name: "status"
+                  header: "Status"
+                - name: "value"
+                  header: "Active"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (node, condition, status) (
+                        ((upgrade_checker_node_condition{job="upgrade-checker",instance="$instance",condition="Ready",status=~"False|Unknown"} == 1)
+                        or (upgrade_checker_node_condition{job="upgrade-checker",instance="$instance",condition=~"MemoryPressure|DiskPressure|PIDPressure|NetworkUnavailable",status="True"} == 1))
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="nodes"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      cordonedNodes:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Cordoned nodes"
+            description: "Confirm whether the cordon is deliberate. Restore node health before uncordoning; a cordoned node is not automatically unhealthy."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "node"
+                  header: "Node"
+                - name: "value"
+                  header: "Cordoned"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (node) (
+                        (upgrade_checker_node_unschedulable{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="nodes"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      pdbDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "PDB drain blockers and budget settings"
+            description: "Current-status drain blockers only. Compare current_healthy, desired_healthy, expected_pods and disruptions_allowed with the configured budget. Restore replicas or agree on safe budget changes with the workload owner."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "exported_namespace"
+                  header: "Namespace"
+                - name: "pdb"
+                  header: "PDB"
+                - name: "measurement"
+                  header: "Status measurement"
+                - name: "min_available"
+                  header: "minAvailable"
+                - name: "max_unavailable"
+                  header: "maxUnavailable"
+                - name: "unhealthy_pod_eviction_policy"
+                  header: "Unhealthy pod eviction"
+                - name: "value"
+                  header: "Pods / allowed disruptions"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (exported_namespace, pdb, measurement, min_available, max_unavailable, unhealthy_pod_eviction_policy) (
+                        (
+                          label_replace(
+                            {__name__=~"upgrade_checker_pdb_(current_healthy|desired_healthy|expected_pods|disruptions_allowed)",job="upgrade-checker",instance="$instance"},
+                            "measurement", "$1", "__name__", "upgrade_checker_pdb_(.*)"
+                          )
+                          and on(job, instance, exported_namespace, pdb)
+                            (upgrade_checker_pdb_blocked{job="upgrade-checker",instance="$instance"} == 1)
+                          and on(job, instance, exported_namespace, pdb)
+                            (upgrade_checker_pdb_status_current{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                        * on(job, instance, exported_namespace, pdb)
+                          group_left(min_available, max_unavailable, unhealthy_pod_eviction_policy)
+                          upgrade_checker_pdb_spec_info{job="upgrade-checker",instance="$instance"}
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      stalePdbDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "PDB status awaiting reconciliation"
+            description: "observedGeneration does not match generation. Inspect the PDB and disruption controller before making a drain decision."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "exported_namespace"
+                  header: "Namespace"
+                - name: "pdb"
+                  header: "PDB"
+                - name: "value"
+                  header: "Status current (0=no)"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (exported_namespace, pdb) (
+                        (upgrade_checker_pdb_status_current{job="upgrade-checker",instance="$instance"} == 0)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="poddisruptionbudgets"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      apiDetails:
+        kind: "Panel"
+        spec:
+          display:
+            name: "API removals: observed usage"
+            description: "The value is the total request count in OpenShift's reporting window, not a cumulative counter. Migrate manifests and clients if removed_in_release applies to the target; this includes recent API clients, not only stored resources."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "name"
+                  header: "APIRequestCount resource"
+                - name: "removed_in_release"
+                  header: "Removed in Kubernetes"
+                - name: "value"
+                  header: "Requests in reporting window"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (name, removed_in_release) (
+                        ((upgrade_checker_api_removal_in_use{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="apirequestcounts"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        ))
+                        * on(job, instance, name) group_left()
+                        upgrade_checker_api_requests_window{job="upgrade-checker",instance="$instance"}
+                      )
+                    instant: true
+      overrides:
+        kind: "Panel"
+        spec:
+          display:
+            name: "Unmanaged release resources to review"
+            description: "Review spec.overrides in oc get clusterversion version -o yaml. CVO does not manage these objects. Dev/CRC overrides may be deliberate; agree on remediation before changing them."
+          plugin:
+            kind: "Table"
+            spec:
+              density: "compact"
+              pagination: true
+              columnSettings:
+                - name: "timestamp"
+                  hide: true
+                - name: "group"
+                  header: "API group"
+                - name: "kind"
+                  header: "Kind"
+                - name: "exported_namespace"
+                  header: "Namespace"
+                - name: "name"
+                  header: "Resource"
+                - name: "value"
+                  header: "Unmanaged"
+                  format:
+                    unit: "decimal"
+                    decimalPlaces: 0
+          queries:
+            - kind: "TimeSeriesQuery"
+              spec:
+                plugin:
+                  kind: "PrometheusTimeSeriesQuery"
+                  spec:
+                    datasource:
+                      kind: "PrometheusDatasource"
+                      name: "upgrade-checker-thanos"
+                    query: |-
+                      max by (group, kind, exported_namespace, name) (
+                        (upgrade_checker_clusterversion_unmanaged_override{job="upgrade-checker",instance="$instance"} == 1)
+                        and on(job, instance) (
+                          (upgrade_checker_collection_success{job="upgrade-checker",instance="$instance",resource="clusterversion"} == 1)
+                          and on(job, instance) (up{job="upgrade-checker",instance="$instance"} == 1)
+                        )
+                      )
+                    instant: true
+      remediation:
+        kind: "Panel"
+        spec:
+          display:
+            name: "What must be fixed before upgrading"
+            description: "Operational checklist and the limits of the current assessment."
+          plugin:
+            kind: "Markdown"
+            spec:
+              text: |-
+                1. **Restore evidence:** Collections must show 5 / 5. Check the exporter pod logs, API permissions and ServiceMonitor target. A blank findings table means no matches only when its collection succeeded.
+                2. **Clear CVO and Operator blockers:** inspect `oc get clusterversion version -o json` and `oc get clusteroperators`. Read full condition messages, resolve their causes and wait for conditions to settle.
+                3. **Restore node health:** use `oc describe node <node>`, resolve kubelet, disk, memory or network issues, and review deliberate cordons.
+                4. **Make drains possible:** inspect `oc -n <namespace> get pdb <pdb> -o yaml` and the selected pods. Restore healthy replicas or agree on a safe budget change. Wait for stale PDB status to reconcile.
+                5. **Review API removals for the actual target:** use `oc get apirequestcount <name> -o yaml` to identify clients, then update their API versions and manifests. Windowed requests must not be queried with `rate()`.
+                6. **Review support coverage:** investigate unmanaged release resources. Separately check third-party Operators, workload manifests and vendor support against the intended OpenShift target; those checks are not implemented by this exporter.
+
+                If the target exposes only `upgrade_ready` / `upgrade_deprecated_apis`, roll out an image built from the current Go exporter. Publishing the mutable `feat` image tag alone does not restart its pod; update the Deployment image to the published digest through Git.
+    layouts:
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Assessment scope"
+          items:
+            - x: 0
+              y: 0
+              width: 24
+              height: 6
+              content:
+                "$ref": "#/spec/panels/guide"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Current readiness evidence"
+          items:
+            - x: 0
+              y: 0
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/collections"
+            - x: 6
+              y: 0
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/cvo"
+            - x: 12
+              y: 0
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/nodeCount"
+            - x: 18
+              y: 0
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/operatorCount"
+            - x: 0
+              y: 4
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/pdbCount"
+            - x: 6
+              y: 4
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/stalePdbCount"
+            - x: 12
+              y: 4
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/apiCount"
+            - x: 18
+              y: 4
+              width: 6
+              height: 4
+              content:
+                "$ref": "#/spec/panels/overrideCount"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Collection and release context"
+          items:
+            - x: 0
+              y: 0
+              width: 8
+              height: 7
+              content:
+                "$ref": "#/spec/panels/collectionDetails"
+            - x: 8
+              y: 0
+              width: 16
+              height: 7
+              content:
+                "$ref": "#/spec/panels/release"
+            - x: 0
+              y: 7
+              width: 24
+              height: 8
+              content:
+                "$ref": "#/spec/panels/cvoConditions"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Operators and nodes"
+          items:
+            - x: 0
+              y: 0
+              width: 24
+              height: 9
+              content:
+                "$ref": "#/spec/panels/operatorDetails"
+            - x: 0
+              y: 9
+              width: 16
+              height: 9
+              content:
+                "$ref": "#/spec/panels/nodeDetails"
+            - x: 16
+              y: 9
+              width: 8
+              height: 9
+              content:
+                "$ref": "#/spec/panels/cordonedNodes"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Pod disruption budgets"
+          items:
+            - x: 0
+              y: 0
+              width: 24
+              height: 9
+              content:
+                "$ref": "#/spec/panels/pdbDetails"
+            - x: 0
+              y: 9
+              width: 24
+              height: 7
+              content:
+                "$ref": "#/spec/panels/stalePdbDetails"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "API and release-resource review"
+          items:
+            - x: 0
+              y: 0
+              width: 24
+              height: 9
+              content:
+                "$ref": "#/spec/panels/apiDetails"
+            - x: 0
+              y: 9
+              width: 24
+              height: 9
+              content:
+                "$ref": "#/spec/panels/overrides"
+      - kind: "Grid"
+        spec:
+          display:
+            title: "Remediation"
+          items:
+            - x: 0
+              y: 0
+              width: 24
+              height: 12
+              content:
+                "$ref": "#/spec/panels/remediation"
