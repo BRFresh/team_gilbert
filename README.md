@@ -161,9 +161,52 @@ clusters, include your cluster identity label in joins as well. Removal versions
 must be interpreted against the selected OpenShift/Kubernetes target version.
 No matching API is an empty result, not proof that all manifests are compatible.
 
+### Deprecated API findings
+
+Retrieve a JSON report directly from the app:
+
+```sh
+curl http://localhost:8080/deprecated-apis
+```
+
+Each request lists the cluster-scoped `apiserver.openshift.io/v1/apirequestcounts`
+API using the same credentials and timeout as the metrics collector. Only resources
+with a nonempty `status.removedInRelease` appear in `findings`, including APIs with
+no observed requests. Existing deployment RBAC already grants the required `list`
+permission; no additional permission is needed.
+
+```json
+{
+  "name": "ingresses.v1beta1.networking.k8s.io",
+  "removedInRelease": "1.22",
+  "requests": 12,
+  "requestsCurrentHour": 3,
+  "usage": "observed",
+  "remediation": "Inspect the APIRequestCount for caller usernames and user agents, then update the calling clients and manifests."
+}
+```
+
+This example is one entry inside the report's `findings` array. `usage` is
+`observed` for a positive reporting-window count, `not_observed` for zero, and
+`unknown` for a missing count. Missing counts are JSON `null`. Failures to read or
+decode API data return HTTP 502 with an `error`, rather than an empty successful
+report. Findings include a command to inspect callers and remediation guidance.
+
+The report includes `apiRequestCountsScanned` and a `status`: `no_data` when the
+cluster returns no APIRequestCount objects, `no_removal_reported` when objects
+exist but none has a removal release, and `removal_reported` when findings exist.
+`no_data` means usage cannot be assessed from this source; it is not a clean result.
+
+Compare the reported removal release with the Kubernetes or OpenShift version
+in your selected target release. APIRequestCount is usage evidence, not a static
+manifest scan or a complete inventory of all deprecated APIs. An empty report
+does not prove upgrade readiness. See the
+[APIRequestCount reference](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/metadata_apis/apirequestcount-apiserver-openshift-io-v1).
+
 The exporter supplies observations. Unsupported-resource policies, target-version
 compatibility, remediation text, and the overall Go/No-Go decision remain with
-the downstream assessment/dashboard. There is no separate deprecated-API endpoint.
+the downstream assessment/dashboard. The `/deprecated-apis` endpoint supplies
+API findings and migration guidance for that assessment.
 
 ## ClusterVersion and actionable upgrade findings
 
