@@ -21,8 +21,10 @@ curl http://localhost:8080/metrics
 
 This is a plain-text Prometheus metrics endpoint, not an HTML dashboard. The
 existing OpenShift collection/forwarding setup can read this endpoint. This repo
-also supplies a [Perses upgrade readiness dashboard](docs/perses.md) for the
-installed Cluster Observability Operator. It does not install Prometheus or COO.
+implements the exporter and a ServiceMonitor for user workload monitoring, and
+supplies a [Perses upgrade readiness dashboard](docs/perses.md) for the installed
+Cluster Observability Operator. It does not install Prometheus or the Cluster
+Observability Operator.
 
 The app reads the same local kubeconfig as `oc`: files listed in `KUBECONFIG`
 when set, otherwise `$HOME/.kube/config`. It uses the current context and credentials.
@@ -47,7 +49,7 @@ The default address binds all interfaces so a collector can reach it if network
 routing permits. Use `-listen-address=127.0.0.1:8080` to restrict it to localhost.
 The endpoint serves plain HTTP without authentication.
 
-Local kubeconfig is the default. For a future pod deployment, `-in-cluster`
+Local kubeconfig is the default. For a pod deployment, `-in-cluster`
 explicitly selects its service account. The container and deployment preparation is described in
 [Publish and deploy](docs/deploy.md). Argo CD deploys the manifests; OpenShift runs the pod.
 
@@ -127,8 +129,10 @@ oc auth can-i get clusterversions.config.openshift.io/version
 
 ```sh
 cd app
-go test -race ./...
+go test ./...
 ```
+
+When CGO and a C compiler are available, also use `go test -race ./...`.
 
 Tests use fake Kubernetes/OpenShift resources and a simulated stalled transport.
 They cover metric values, missing fields, permission failures and recovery,
@@ -137,9 +141,15 @@ deleted resources, and API timeouts without needing a live cluster.
 ## Container publishing and OpenShift
 
 See [Publish and deploy](docs/deploy.md) for the GHCR workflow, ServiceAccount
-credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`. The nginx test app stays
-in `manifests`; configure the scanner Argo CD Application to watch `feat` at
-`deploy/upgrade-checker`.
+credentials, read-only RBAC, and the scanner manifests in `deploy/upgrade-checker`.
+Configure the Argo CD Application to watch `feat` at `deploy/upgrade-checker`,
+with destination namespace `upgrade-checker`. This is the only application
+deployment; `manifests/` contains only the cluster-wide monitoring configuration.
+
+In `deploy/upgrade-checker/`, `app.yaml` defines the Deployment. The Service,
+ServiceAccount, RBAC, namespace, Route, and ServiceMonitor each have separate YAML files.
+After Argo CD syncs the manifests, use `oc -n upgrade-checker get route upgrade-checker`
+to find the external hostname, then open `http://<route-host>/metrics`.
 
 ## Using the extra evidence
 
@@ -169,7 +179,8 @@ No matching API is an empty result, not proof that all manifests are compatible.
 
 The exporter supplies observations. Unsupported-resource policies, target-version
 compatibility, remediation text, and the overall Go/No-Go decision remain with
-the downstream assessment/dashboard. There is no separate deprecated-API endpoint.
+the downstream assessment/dashboard. APIRequestCount findings are exposed through
+`/metrics`; there is no separate `/deprecated-apis` endpoint.
 
 ## ClusterVersion and actionable upgrade findings
 

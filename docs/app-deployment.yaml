@@ -1,2 +1,4 @@
-# The active deployment manifest is now deploy/upgrade-checker/app.yaml.
+# Scanner manifests are split by function in deploy/upgrade-checker/.
+# app.yaml contains only the Deployment; service.yaml, serviceaccount.yaml,
+# rbac.yaml, namespace.yaml, route.yaml, and servicemonitor.yaml define the other resources.
 # See docs/deploy.md for the Argo CD path and release steps.

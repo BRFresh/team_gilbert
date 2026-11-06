@@ -107,7 +107,7 @@ its image digest to the Deployment in `deploy/upgrade-checker/app.yaml` on
 `feat`, as described in [Publish and deploy](deploy.md#subsequent-releases).
 Argo CD will roll out the changed Deployment. Re-publishing the mutable `feat`
 tag alone does not restart an existing pod. Also sync the scanner RBAC from
-`app.yaml`, including the ClusterVersion permission.
+`deploy/upgrade-checker/rbac.yaml`, including the ClusterVersion permission.
 
 In **Observe → Metrics**, check:
 
