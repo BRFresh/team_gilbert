@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upgrade-checker
+  namespace: upgrade-checker
+  labels:
+    app: upgrade-checker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: upgrade-checker
+  template:
+    metadata:
+      labels:
+        app: upgrade-checker
+    spec:
+      serviceAccountName: upgrade-checker
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: upgrade-checker
+        image: ghcr.io/brfresh/team_gilbert:feat
+        imagePullPolicy: Always
+        args: ["-in-cluster", "-listen-address=:8080", "-api-timeout=5s"]
+        ports:
+        - name: metrics
+          containerPort: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
